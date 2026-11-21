@@ -1,9 +1,9 @@
-// Calendar as a spur: every Google calendar in one, synced both ways. Its tools read,
-// find time and write; its events tell the brain what changed; its widgets are an agenda and an event
+// Calendar as an extension: every Google calendar in one, synced both ways. Its tools read, find
+// time and write; its events tell the brain what changed; its widgets are an agenda and an event
 // card for chat.
 import { Effect, Schema } from "effect"
 
-import { defineApp, SWITCH_CATALOG, tool } from "spur-kit"
+import { defineApp, SWITCH_CATALOG, tool } from "switch-ext-kit"
 import { Calendars } from "./calendars.ts"
 import * as google from "./google.ts"
 import type { Fields } from "./calendars.ts"

@@ -3,7 +3,7 @@
 // invites live in the providers, so they stay the source of truth: a write lands there first.
 import { Context, Effect, Layer, Schedule, Schema } from "effect"
 
-import { AppEvents } from "spur-kit"
+import { AppEvents } from "switch-ext-kit"
 import * as core from "./core.ts"
 import {
   Conflict,

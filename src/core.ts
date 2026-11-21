@@ -76,7 +76,7 @@ export const itemDone = (id: string) =>
   })
 
 /**
- * Contacts' people for these emails: `{email: personId}`. Contacts owns people; until its spur
+ * Contacts' people for these emails: `{email: personId}`. Contacts owns people; until its extension
  * answers `contacts_match`, this is empty.
  */
 export const people = (emails: readonly string[]) =>

@@ -1,6 +1,6 @@
 // Calendar's layers, and serving it on stdio, syncing.
 import { Layer } from "effect"
-import { AppEvents, serveStdio } from "spur-kit"
+import { AppEvents, serveStdio } from "switch-ext-kit"
 
 import { calendarApp } from "./app.ts"
 import { Calendars } from "./calendars.ts"

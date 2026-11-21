@@ -1,5 +1,5 @@
-// The spur's own state, in SQLite: calendars and their sync cursors, every event, what the brain has
-// been told, and the write log that undo reads.
+// The extension's own state, in SQLite: calendars and their sync cursors, every event, what the
+// brain has been told, and the write log that undo reads.
 import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import path from "node:path"

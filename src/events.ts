@@ -1,6 +1,6 @@
 // What Calendar tells the brain. Only events from a day back to two months ahead are told; one
 // that comes into that span later is told then.
-import { defineEvent } from "spur-kit"
+import { defineEvent } from "switch-ext-kit"
 import { Schema } from "effect"
 
 import { event } from "./model.ts"

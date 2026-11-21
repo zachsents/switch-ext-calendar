@@ -8,8 +8,8 @@ nonisolated struct Failure: LocalizedError, Sendable {
   var errorDescription: String? { message }
 }
 
-/// Switch's core, as this app reaches it: its spur's tools through the core's gateway (a POST to
-/// `/widgets/<app>/<tool>`, the same tools an agent calls), the brain's events on the core's sync
+/// Switch's core, as this app reaches it: its extension's tools through the core's gateway (a POST
+/// to `/widgets/<app>/<tool>`, the same tools an agent calls), the brain's events on the core's sync
 /// socket, and what the user does here, as the client `ui.*` events.
 ///
 /// The core's address is config, never code: a launch argument or setting (`-core ws://…`), else
@@ -18,7 +18,7 @@ nonisolated struct Failure: LocalizedError, Sendable {
 final class Core: NSObject, URLSessionWebSocketDelegate {
   enum Link: Equatable { case connecting, open, down }
 
-  /// The spur's name in the core: its tools are `<app>_<tool>`.
+  /// The extension's name in the core: its tools are `<app>_<tool>`.
   let app: String
   private(set) var link: Link = .connecting
   /// The core's HTTP root, and its sync socket.
@@ -59,7 +59,7 @@ final class Core: NSObject, URLSessionWebSocketDelegate {
 
   // MARK: Tools
 
-  /// Calls one of the spur's tools (or another app's, `app:`): its structured result.
+  /// Calls one of the extension's tools (or another app's, `app:`): its structured result.
   func call(_ tool: String, _ args: JSON = [:], app: String? = nil) async throws -> JSON {
     guard let http else { throw Failure(message: "No core set") }
     var request = URLRequest(url: http.appending(path: "widgets/\(app ?? self.app)/\(tool)"))
