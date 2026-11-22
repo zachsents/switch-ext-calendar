@@ -545,7 +545,11 @@ export const calendarApp = defineApp<Calendars>({
                 id: "head",
                 component: "Text",
                 catalogId: BASIC_CATALOG,
-                text: { "@call": "formatString", args: { value: `# \${/day}` } },
+                text: {
+                  "@call": "formatString",
+                  catalogId: BASIC_CATALOG,
+                  args: { value: `# \${/day}` },
+                },
               },
               {
                 id: "rows",
