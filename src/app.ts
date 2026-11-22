@@ -3,7 +3,7 @@
 // card for chat.
 import { Effect, Schema } from "effect"
 
-import { defineApp, SWITCH_CATALOG, tool } from "switch-ext-kit"
+import { BASIC_CATALOG, defineApp, SWITCH_CATALOG, tool } from "switch-ext-kit"
 import { Calendars } from "./calendars.ts"
 import * as google from "./google.ts"
 import type { Fields } from "./calendars.ts"
@@ -535,9 +535,24 @@ export const calendarApp = defineApp<Calendars>({
           updateComponents: {
             surfaceId: "agenda",
             components: [
-              { id: "root", component: "Stack", children: ["head", "rows", "empty"] },
-              { id: "head", component: "Head", label: { "@path": "/day" } },
-              { id: "rows", component: "Lines", children: { componentId: "row", path: "/rows" } },
+              {
+                id: "root",
+                component: "Column",
+                catalogId: BASIC_CATALOG,
+                children: ["head", "rows", "empty"],
+              },
+              {
+                id: "head",
+                component: "Text",
+                catalogId: BASIC_CATALOG,
+                text: { "@call": "formatString", args: { value: `# \${/day}` } },
+              },
+              {
+                id: "rows",
+                component: "List",
+                catalogId: BASIC_CATALOG,
+                children: { componentId: "row", path: "/rows" },
+              },
               {
                 id: "row",
                 component: "Slot",
@@ -547,7 +562,13 @@ export const calendarApp = defineApp<Calendars>({
                 needsYou: { "@path": "needsYou" },
                 conflict: { "@path": "conflict" },
               },
-              { id: "empty", component: "Empty", label: { "@path": "/empty" } },
+              {
+                id: "empty",
+                component: "Text",
+                catalogId: BASIC_CATALOG,
+                text: { "@path": "/empty" },
+                variant: "caption",
+              },
             ],
           },
         },
@@ -568,7 +589,12 @@ export const calendarApp = defineApp<Calendars>({
           updateComponents: {
             surfaceId: "event",
             components: [
-              { id: "root", component: "Stack", children: ["title", "fields", "people"] },
+              {
+                id: "root",
+                component: "Column",
+                catalogId: BASIC_CATALOG,
+                children: ["title", "fields", "people"],
+              },
               {
                 id: "title",
                 component: "Title",
@@ -577,12 +603,14 @@ export const calendarApp = defineApp<Calendars>({
               },
               {
                 id: "fields",
-                component: "Lines",
+                component: "List",
+                catalogId: BASIC_CATALOG,
                 children: { componentId: "field", path: "/fields" },
               },
               {
                 id: "people",
-                component: "Lines",
+                component: "List",
+                catalogId: BASIC_CATALOG,
                 children: { componentId: "field", path: "/people" },
               },
               {
