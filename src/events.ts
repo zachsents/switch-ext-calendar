@@ -3,6 +3,7 @@
 import { defineEvent } from "switch-ext-kit"
 import { Schema } from "effect"
 
+import { Heartbeat } from "./heartbeat.ts"
 import { event } from "./model.ts"
 
 /** Set when Switch made the change: the write's id, which `undo` takes. */
@@ -72,4 +73,5 @@ export const calendarEvents = [
   StartingSoon,
   Conflict,
   Next,
+  Heartbeat,
 ]

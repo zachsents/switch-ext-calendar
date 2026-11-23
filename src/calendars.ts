@@ -15,6 +15,7 @@ import {
   StartingSoon,
 } from "./events.ts"
 import * as google from "./google.ts"
+import { attempt, makeHeart, why } from "./heartbeat.ts"
 import { awaiting, event, holds, others } from "./model.ts"
 import type { Calendar, Delta, Event, Response } from "./model.ts"
 import type { Settings } from "./settings.ts"
@@ -96,19 +97,32 @@ const make = (settings: Settings) =>
     /** Writes waiting to be told, by event id. */
     const writeOf = new Map<string, string>()
     let lastNext = ""
-
-    const emit = (draft: { readonly type: string; readonly payload: unknown }) =>
-      Effect.ignore(events.emit(draft), { log: "Warn" })
+    let lastTick = Date.now()
+    const heart = makeHeart(events)
 
     const calendarOf = (id: string) => store.calendars().find((c) => c.id === id) ?? null
 
     // Applying what a source says
 
+    /**
+     * Stores what a source says. An event that won't store is skipped, and the cursor stays where
+     * it was, so the next read brings it again; what failed comes back.
+     */
     const apply = (calendar: Calendar, delta: Delta) => {
       const seen = new Set<string>()
+      const failed: string[] = []
+      const each = (what: string, store1: () => void) => {
+        try {
+          store1()
+        } catch (error) {
+          failed.push(`${what}: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
       for (const e of delta.events) {
         seen.add(e.id)
-        store.put(e)
+        each(`${e.title} (${e.id})`, () => {
+          store.put(e)
+        })
       }
       const gone = [...delta.gone]
       if (delta.full) {
@@ -121,14 +135,17 @@ const make = (settings: Settings) =>
         }
       }
       for (const id of gone) {
-        const s = store.get(id)
-        if (s !== null && s.event.status !== "cancelled") {
-          store.put({ ...s.event, status: "cancelled" })
-        }
+        each(id, () => {
+          const s = store.get(id)
+          if (s !== null && s.event.status !== "cancelled") {
+            store.put({ ...s.event, status: "cancelled" })
+          }
+        })
       }
-      if (delta.cursor !== null || delta.full) {
+      if (failed.length === 0 && (delta.cursor !== null || delta.full)) {
         store.setCursor(calendar.id, delta.cursor)
       }
+      return failed
     }
 
     const syncGoogle = (account: string) =>
@@ -153,11 +170,19 @@ const make = (settings: Settings) =>
             out.push({ ...summary(c), error: result.failure.message })
             continue
           }
-          apply(c, result.success)
+          const failed = apply(c, result.success)
           if (first) {
             initial.add(c.id)
           }
-          out.push(summary(c))
+          const [one] = failed
+          out.push(
+            one === undefined
+              ? summary(c)
+              : {
+                  ...summary(c),
+                  error: failed.length === 1 ? one : `${failed.length} not stored; ${one}`,
+                },
+          )
         }
         return out
       })
@@ -195,35 +220,45 @@ const make = (settings: Settings) =>
         }
         return Object.keys(people).length === 0 ? e : { ...e, people }
       }
+      // Each event on its own: one that can't be told stays untold, and is tried again next time.
+      const pass = heart.pass("tell")
       for (const s of span) {
         const e = withPeople(s.event)
-        const json = JSON.stringify(e)
-        const write = writeOf.get(e.id)
-        writeOf.delete(e.id)
-        const by = write === undefined ? {} : { write }
-        if (s.told === null) {
-          if (e.status !== "cancelled") {
-            const first = initial.has(e.calendar)
-            yield* emit(EventCreated.make({ event: e, ...(first ? { initial: true } : {}), ...by }))
-            store.setTold(e.id, json)
-          }
-        } else if (e.status === "cancelled") {
-          yield* emit(EventCancelled.make({ event: e, ...by }))
-          store.setTold(e.id, null)
-        } else if (s.told !== json) {
-          const changes = changesOf(parseEvent(s.told), e)
-          if (changes.length > 0 || write !== undefined) {
-            yield* emit(EventChanged.make({ event: e, changes, ...by }))
-          }
-          store.setTold(e.id, json)
-        }
-        if (!s.inviteTold && awaiting(e, now) && !initial.has(e.calendar)) {
-          yield* emit(InviteReceived.make({ event: e }))
-          store.setInviteTold(e.id)
-        } else if (!s.inviteTold && initial.has(e.calendar)) {
-          store.setInviteTold(e.id)
-        }
+        yield* pass.item(
+          `${e.title} (${e.id})`,
+          Effect.gen(function* tellingOne() {
+            const json = JSON.stringify(e)
+            const write = writeOf.get(e.id)
+            const by = write === undefined ? {} : { write }
+            if (s.told === null) {
+              if (e.status !== "cancelled") {
+                const first = initial.has(e.calendar)
+                yield* events.emit(
+                  EventCreated.make({ event: e, ...(first ? { initial: true } : {}), ...by }),
+                )
+                store.setTold(e.id, json)
+              }
+            } else if (e.status === "cancelled") {
+              yield* events.emit(EventCancelled.make({ event: e, ...by }))
+              store.setTold(e.id, null)
+            } else if (s.told !== json) {
+              const changes = changesOf(parseEvent(s.told), e)
+              if (changes.length > 0 || write !== undefined) {
+                yield* events.emit(EventChanged.make({ event: e, changes, ...by }))
+              }
+              store.setTold(e.id, json)
+            }
+            writeOf.delete(e.id)
+            if (!s.inviteTold && awaiting(e, now) && !initial.has(e.calendar)) {
+              yield* events.emit(InviteReceived.make({ event: e }))
+              store.setInviteTold(e.id)
+            } else if (!s.inviteTold && initial.has(e.calendar)) {
+              store.setInviteTold(e.id)
+            }
+          }),
+        )
       }
+      pass.done()
       initial.clear()
       yield* conflicts
     })
@@ -267,16 +302,23 @@ const make = (settings: Settings) =>
 
     const conflicts = Effect.gen(function* conflicting() {
       const now = Date.now()
+      const pass = heart.pass("conflicts")
       for (const [a, b] of conflictsIn(now, now + 14 * DAY)) {
         const pair = [a, b]
           .map((e) => `${e.id}@${e.start}-${e.end}`)
           .toSorted()
           .join("|")
         if (!store.conflictSeen(pair)) {
-          store.addConflict(pair)
-          yield* emit(Conflict.make({ events: [a, b] }))
+          yield* pass.item(
+            `${a.title} and ${b.title}`,
+            Effect.gen(function* tellingOne() {
+              yield* events.emit(Conflict.make({ events: [a, b] }))
+              store.addConflict(pair)
+            }),
+          )
         }
       }
+      pass.done()
     })
 
     // The clock: starting soon, and the next meeting
@@ -284,13 +326,19 @@ const make = (settings: Settings) =>
     const tick = Effect.gen(function* ticking() {
       const now = Date.now()
       const upcoming = merged(now, now + DAY).filter((e) => holds(e) && e.start > now)
+      const pass = heart.pass("clock")
       for (const e of upcoming.filter((x) => x.start - now <= SOON_MS)) {
         const s = store.get(e.id)
         if (s !== null && s.soonTold !== e.start) {
-          yield* emit(
-            StartingSoon.make({ event: e, minutes: Math.round((e.start - now) / MINUTE) }),
+          yield* pass.item(
+            `${e.title} (${e.id})`,
+            Effect.gen(function* tellingOne() {
+              yield* events.emit(
+                StartingSoon.make({ event: e, minutes: Math.round((e.start - now) / MINUTE) }),
+              )
+              store.setSoonTold(e.id, e.start)
+            }),
           )
-          store.setSoonTold(e.id, e.start)
         }
       }
       const first = upcoming.find((e) => sameDay(e.start, now))
@@ -306,9 +354,16 @@ const make = (settings: Settings) =>
             }
       const key = JSON.stringify(next)
       if (key !== lastNext) {
-        lastNext = key
-        yield* emit(Next.make({ next }))
+        yield* pass.item(
+          "next",
+          Effect.gen(function* tellingNext() {
+            yield* events.emit(Next.make({ next }))
+            lastNext = key
+          }),
+        )
       }
+      pass.done()
+      lastTick = Date.now()
     })
 
     // Syncing
@@ -317,6 +372,7 @@ const make = (settings: Settings) =>
     const pull = Effect.gen(function* pulling() {
       const out: Sync[] = []
       const known = yield* core.googleAccounts(google.SCOPE)
+      heart.set("connections", known === null ? "Can't reach the core" : null)
       if (known !== null) {
         googles = known
         if (known.length === 0 && !asked) {
@@ -325,9 +381,9 @@ const make = (settings: Settings) =>
         }
       }
       for (const account of googles) {
-        const r = yield* Effect.result(syncGoogle(account))
+        const r = yield* Effect.exit(syncGoogle(account))
         if (r._tag === "Success") {
-          out.push(...r.success)
+          out.push(...r.value)
         } else {
           out.push({
             calendar: `google:${account}`,
@@ -335,14 +391,57 @@ const make = (settings: Settings) =>
             provider: "google",
             account,
             events: 0,
-            error: r.failure.message,
+            error: why(r.cause),
           })
         }
       }
+      const failed = out.filter((s) => s.error !== undefined)
+      heart.set(
+        "calendars",
+        failed.length === 0 ? null : failed.map((s) => `${s.name}: ${s.error ?? ""}`).join(", "),
+      )
       return out
     })
 
     const sync = Effect.tap(pull, () => tell)
+
+    // Whether it works
+
+    const beat = (round: boolean) =>
+      Effect.suspend(() => {
+        const calendars = store.calendars().length
+        let n = 0
+        for (const c of store.counts()) {
+          n += c.n
+        }
+        const failing = heart.failingParts()
+        const line =
+          failing.length === 0
+            ? `${calendars} calendars, ${googles.length} accounts`
+            : `failing: ${failing.join(", ")}`
+        return heart.beat(round, { accounts: googles.length, calendars, events: n }, line)
+      })
+
+    /** One round of the sync loop: every source read and told, then the beat. */
+    const syncRound = Effect.gen(function* syncing() {
+      const error = yield* attempt(sync)
+      heart.set("sync", error)
+      const quiet = Date.now() - lastTick
+      heart.set(
+        "clock loop",
+        quiet > 5 * MINUTE ? `no tick since ${new Date(lastTick).toISOString()}` : null,
+      )
+      yield* beat(true)
+    })
+
+    /** One round of the clock loop; a change in what's failing beats at once. */
+    const tickRound = Effect.gen(function* ticking() {
+      const error = yield* attempt(tick)
+      if (error !== null) {
+        heart.set("clock", error)
+      }
+      yield* beat(false)
+    })
 
     // Writing
 
@@ -710,6 +809,8 @@ const make = (settings: Settings) =>
       pull,
       sync,
       tick,
+      syncRound,
+      tickRound,
       merged,
       conflictsIn,
       create,
@@ -735,12 +836,8 @@ export class Calendars extends Context.Service<
   static readonly workers = Layer.effectDiscard(
     Effect.gen(function* working() {
       const c = yield* Calendars
-      yield* Effect.forkScoped(
-        Effect.repeat(Effect.ignore(c.sync, { log: "Warn" }), Schedule.spaced("1 minute")),
-      )
-      yield* Effect.forkScoped(
-        Effect.repeat(Effect.ignore(c.tick, { log: "Warn" }), Schedule.spaced("30 seconds")),
-      )
+      yield* Effect.forkScoped(Effect.repeat(c.syncRound, Schedule.spaced("1 minute")))
+      yield* Effect.forkScoped(Effect.repeat(c.tickRound, Schedule.spaced("30 seconds")))
     }),
   )
 }
