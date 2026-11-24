@@ -1,3 +1,5 @@
+**Moved to [zachsents/switch](https://github.com/zachsents/switch/tree/main/extensions/calendar).** This repo is archived.
+
 # switch-ext-calendar
 
 Every Google calendar in one, synced both ways: Google stays the source of truth, every write can be undone, and anything that would email someone else waits for the user. Agenda, free time, conflicts and invites; an agenda widget.
