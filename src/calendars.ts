@@ -445,15 +445,27 @@ const make = (settings: Settings) =>
 
     // Writing
 
-    const resolveCalendar = (given: string | undefined) => {
-      const all = store.calendars().filter((c) => c.writable)
-      const want = (given ?? settings.calendar ?? "").toLowerCase()
-      const found =
-        all.find((c) => c.id.toLowerCase() === want) ??
-        all.find((c) => c.name.toLowerCase() === want) ??
-        (want === "" ? all.find((c) => c.primary && c.account === googles[0]) : undefined)
-      return found ?? null
-    }
+    // Just started, the first pull may have come before the core answered, leaving no accounts: a
+    // call that finds no calendar asks the core for them again before it refuses.
+    const resolveCalendar = (given: string | undefined) =>
+      Effect.gen(function* resolving() {
+        const want = (given ?? settings.calendar ?? "").toLowerCase()
+        const pick = () => {
+          const all = store.calendars().filter((c) => c.writable)
+          return (
+            all.find((c) => c.id.toLowerCase() === want) ??
+            all.find((c) => c.name.toLowerCase() === want) ??
+            (want === "" ? all.find((c) => c.primary && c.account === googles[0]) : undefined) ??
+            null
+          )
+        }
+        const found = pick()
+        if (found !== null) {
+          return found
+        }
+        googles = (yield* core.googleAccounts(google.SCOPE)) ?? googles
+        return pick()
+      })
 
     const find = (id: string) => {
       const s = store.get(id)
@@ -541,7 +553,7 @@ const make = (settings: Settings) =>
       readonly undoes?: string
     }) =>
       Effect.gen(function* creating() {
-        const calendar = resolveCalendar(input.calendar)
+        const calendar = yield* resolveCalendar(input.calendar)
         if (calendar === null) {
           return yield* Effect.fail(new Error(`No calendar ${input.calendar ?? ""} to write to`))
         }
@@ -572,7 +584,7 @@ const make = (settings: Settings) =>
     /** An event from a line of text, as Google reads it; undone like create. */
     const quickAdd = (input: { readonly text: string; readonly calendar?: string }) =>
       Effect.gen(function* adding() {
-        const calendar = resolveCalendar(input.calendar)
+        const calendar = yield* resolveCalendar(input.calendar)
         if (calendar === null) {
           return yield* Effect.fail(new Error(`No calendar ${input.calendar ?? ""} to write to`))
         }
